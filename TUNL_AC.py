@@ -16,12 +16,13 @@ import matplotlib.pyplot as plt
 
 
 
-"""=================================
-
-Define TUNL environment - without delay
-
-
-================================="""
+#===============================
+#
+#
+# Define TUNL environment - without delay
+#
+#
+#================================
 
 class SimpleTunlEnv(object):
     def __init__(self):
@@ -78,12 +79,13 @@ class SimpleTunlEnv(object):
   
   
 
-"""=================================
-
-Define TUNL environment - with delay
-
-
-================================="""
+#===============================
+#
+#
+# Define TUNL environment - with delay
+#
+#
+#================================
 
 
   class SimpleMemoryTunlEnv(object):
@@ -145,14 +147,13 @@ Define TUNL environment - with delay
         self.reward = 0
         self.done = False
 
-
-"""=============================
-
-
-Define actor-critic network and functions for end-of-trial
-
-
-============================="""
+#===============================
+#
+#
+# Define actor-critic network and functions for end-of-trial
+#
+#
+#================================
 
 
 
@@ -358,13 +359,13 @@ def finish_trial(model, discount_factor, optimizer, **kwargs):
 
 
 
-"""=========================================
-
-
-Experiment: Without Delay
-
-
-========================================="""
+#===============================
+#
+#
+# Experiment - without delay
+#
+#
+#================================
 
 
 
@@ -488,14 +489,13 @@ ax.set_ylabel('undiscounted return of each episode')
 ax.set_title("undiscounted return of each episode") 
 ax.legend()
 
-
-"""=========================================
-
-
-Experiment: With Delay
-
-
-========================================="""
+#===============================
+#
+#
+# Experiment - with delay
+#
+#
+#================================
 
 env = SimpleMemoryTunlEnv()
 net_lstm = AC_Net(2,2,1,['lstm','linear'],[2,2]) 
