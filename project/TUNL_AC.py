@@ -150,6 +150,63 @@ class SimpleTunlEnv(object):
 #===============================
 #
 #
+# Define TUNL environment - without delay, with only one possible sample (L)
+# For testing the validity of LSTM network
+#
+#
+#================================
+
+class SimpleTunlEnv_OneInput(object):
+    def __init__(self):
+      """
+      In this simplified version of TUNL environment, we abandoned the delay period, and simplified the sample phase to one possible input. 
+      After each reset, the animal will receive a sample L, and needs to immediately choose the nonmatch location (R).
+      Correct choice will lead to a reward (r = 1) and finish the episode, while incorrect choice will lead to a punishment (r = -1)
+      and animal needs to choose again until correct. 
+      
+      Observation space:
+      [1,0] = left sample
+      [0,1] = right sample
+
+      action space:
+      0 = choose left
+      1 = choose right
+      """
+      self.observation = None
+      self.action_space = spaces.Discrete(2)
+      self.observation_space = spaces.MultiBinary(2)
+      self.reward = 0 # reward at each step
+      self.done = False
+      self.seed()
+    def step(self, action):
+        """
+        :param action:
+        :return: observation, reward, done, info
+        """
+        assert self.action_space.contains(action)
+        if (np.all(self.observation == array([[1,0]])) and action == 0) or (np.all(self.observation == array([[0,1]])) and action == 1):
+          self.reward = -1
+          self.done = False
+        elif (np.all(self.observation == array([[1,0]])) and action == 1) or (np.all(self.observation == array([[0,1]])) and action == 0):
+          self.reward = 1
+          self.done = True
+        return self.observation, self.reward, self.done, {}
+
+    def seed(self, seed=None):
+        self.np_random, seed = seeding.np_random(seed)
+        return [seed]
+
+    def reset(self):
+        self.observation = array([[1,0]])
+        self.reward = 0
+        self.done = False
+
+
+
+
+#===============================
+#
+#
 # Define actor-critic network and functions for end-of-trial
 #
 #
@@ -357,6 +414,83 @@ def finish_trial(model, discount_factor, optimizer, **kwargs):
     return p_loss, v_loss
 
 
+#===============================
+#
+#
+# Experiment - Random Policy Baseline
+#
+#
+#================================
+env = SimpleMemoryTunlEnv()
+runs = 10
+episodes = 500
+
+
+#For recording and plotting purposes
+
+result_cum_returns = []
+result_avg_returns = [] # average return in an episode, not the average of episode return at a certain time step
+result_episode_returns = [] 
+
+results = []
+
+for i_run in range(runs):
+  cum_return = 0
+  cum_returns = []
+  avg_returns = []
+  episode_returns = []
+  for i_episode in range(episodes): 
+      episode_return = 0
+      env.seed()
+      env.reset()
+      env.get_obs(np.expand_dims(np.random.choice(2,2,p=[0.5,0.5], replace=False),axis=0))
+      done = False
+      while not done:
+          observation, reward, done, info = env.step(env.action_space.sample()) # here, reward is either 1 or -1
+          episode_return = episode_return + reward # undiscounted episode return
+      episode_returns.append(episode_return)
+      cum_return = cum_return + episode_return
+      cum_returns.append(cum_return)
+      avg_returns.append(cum_return / (i_episode + 1))
+  result_cum_returns.append(cum_returns)
+  result_avg_returns.append(avg_returns)
+  result_episode_returns.append(episode_returns)
+
+mean_cum_rts = np.array(result_cum_returns).mean(axis=0)
+mean_avg_rts = np.array(result_avg_returns).mean(axis=0)
+mean_episode_rts = np.array(result_episode_returns).mean(axis=0)
+std_cum_rts = np.array(result_cum_returns).std(axis=0)
+std_avg_rts = np.array(result_avg_returns).std(axis=0)
+std_episode_rts = np.array(result_episode_returns).std(axis=0)
+
+x = list(range(episodes))
+
+fig, ax = plt.subplots()
+ax.plot(x, mean_cum_rts, label='random policy',color = 'deeppink')
+ax.fill_between(x, mean_cum_rts, mean_cum_rts + std_cum_rts, color = 'pink')
+ax.fill_between(x, mean_cum_rts, mean_cum_rts - std_cum_rts, color = 'pink')
+ax.set_xlabel('episode')  
+ax.set_ylabel('cumulative return')  
+ax.set_title("random policy cumulative undiscounted return") 
+ax.legend()
+
+fig, ax = plt.subplots()
+ax.plot(x, mean_avg_rts, label='random policy',color = 'deeppink')
+ax.fill_between(x, mean_avg_rts, mean_avg_rts + std_avg_rts, color = 'pink')
+ax.fill_between(x, mean_avg_rts, mean_avg_rts - std_avg_rts, color = 'pink')
+ax.set_xlabel('episode')  
+ax.set_ylabel('average undiscounted return per episode')  
+ax.set_title("random policy average undiscounted return per episode") 
+ax.legend()
+
+fig, ax = plt.subplots()
+ax.plot(x, mean_episode_rts, label='random policy',color = 'deeppink')
+ax.fill_between(x, mean_episode_rts, mean_episode_rts + std_episode_rts, color = 'pink')
+ax.fill_between(x, mean_episode_rts, mean_episode_rts - std_episode_rts, color = 'pink')
+ax.set_xlabel('episode')  
+ax.set_ylabel('undiscounted return of each episode')  
+ax.set_title("random policy undiscounted return of each episode") 
+ax.legend()
 
 
 #===============================
@@ -536,6 +670,134 @@ for i_run in range(runs):
       env.get_obs(np.expand_dims(np.random.choice(2,2,p=[0.5,0.5], replace=False),axis=0))
       obs_lstm = torch.as_tensor(env.observation)
       obs_fc = torch.as_tensor(env.observation)
+      while (not done_fc) and (not done_lstm):
+        pol_lstm, val_lstm, lin_act_lstm = net_lstm.forward(obs_lstm.float()) # lin_act_lstm needed if the last layer is linear
+        pol_fc, val_fc, lin_act_fc = net_fc.forward(obs_fc.float())
+        act_lstm, p_lstm, v_lstm = select_action(net_lstm, pol_lstm, val_lstm)
+        act_fc, p_fc, v_fc = select_action(net_fc, pol_fc, val_fc)
+        new_obs_lstm, reward_lstm, done_lstm, info_lstm = env.step(act_lstm) #reward_lstm = 1 or -1
+        new_obs_fc, reward_fc, done_fc, info_fc = env.step(act_fc)
+        net_lstm.rewards.append(reward_lstm) # net.rewards = [-1, -1, 1] etc.
+        net_fc.rewards.append(reward_fc)
+        episode_return_lstm += reward_lstm # undiscounted episode return, equals to sum of rewards
+        episode_return_fc += reward_fc
+        obs_lstm = torch.as_tensor(new_obs_lstm)
+        obs_fc = torch.as_tensor(new_obs_fc)
+      episode_returns_lstm.append(episode_return_lstm)
+      episode_returns_fc.append(episode_return_fc)
+      p_loss_lstm, v_loss_lstm = finish_trial(net_lstm, 0.99, optimizer_lstm)
+      p_loss_fc, v_loss_fc = finish_trial(net_fc, 0.99, optimizer_fc)
+      cum_return_lstm += episode_return_lstm # cumulative undiscounted return for all episodes
+      cum_return_fc += episode_return_fc
+      cum_returns_lstm.append(cum_return_lstm) # cumulative undiscounted return, for plotting
+      cum_returns_fc.append(cum_return_fc)
+      avg_returns_fc.append(cum_return_fc / (i_episode + 1)) # avg undiscounted return per episode,for plotting
+      avg_returns_lstm.append(cum_return_lstm / (i_episode + 1))
+  result_cum_returns_lstm.append(cum_returns_lstm)
+  result_cum_returns_fc.append(cum_returns_fc)
+  result_avg_returns_lstm.append(avg_returns_lstm) # average return in an episode, not the average of episode return at a certain time step
+  result_avg_returns_fc.append(avg_returns_fc)
+  result_episode_returns_lstm.append(episode_returns_lstm)
+  result_episode_returns_fc.append(episode_returns_fc) 
+
+mean_cum_rts_lstm = np.array(result_cum_returns_lstm).mean(axis=0)
+mean_cum_rts_fc = np.array(result_cum_returns_fc).mean(axis=0)
+mean_avg_rts_lstm = np.array(result_avg_returns_lstm).mean(axis=0)
+mean_avg_rts_fc = np.array(result_avg_returns_fc).mean(axis=0)
+mean_episode_rts_lstm = np.array(result_episode_returns_lstm).mean(axis=0)
+mean_episode_rts_fc = np.array(result_episode_returns_fc).mean(axis=0)
+std_cum_rts_lstm = np.array(result_cum_returns_lstm).std(axis=0)
+std_cum_rts_fc = np.array(result_cum_returns_fc).std(axis=0)
+std_avg_rts_lstm = np.array(result_avg_returns_lstm).std(axis=0)
+std_avg_rts_fc = np.array(result_avg_returns_fc).std(axis=0)
+std_episode_rts_lstm = np.array(result_episode_returns_lstm).std(axis=0)
+std_episode_rts_fc = np.array(result_episode_returns_fc).std(axis=0)
+
+x = list(range(episodes))
+
+fig, ax = plt.subplots()
+ax.plot(x, mean_cum_rts_lstm, label='lstm',color = 'royalblue')
+ax.plot(x, mean_cum_rts_fc, label='fully connected',color = 'orange')
+ax.fill_between(x, mean_cum_rts_lstm, mean_cum_rts_lstm + std_cum_rts_lstm, color = 'cornflowerblue')
+ax.fill_between(x, mean_cum_rts_lstm, mean_cum_rts_lstm - std_cum_rts_lstm, color = 'cornflowerblue')
+ax.fill_between(x, mean_cum_rts_fc, mean_cum_rts_fc + std_cum_rts_fc, color = 'bisque')
+ax.fill_between(x, mean_cum_rts_fc, mean_cum_rts_fc - std_cum_rts_fc, color = 'bisque')
+ax.set_xlabel('episode')  
+ax.set_ylabel('cumulative return')  
+ax.set_title("cumulative undiscounted return") 
+ax.legend()
+
+fig, ax = plt.subplots()
+ax.plot(x, mean_avg_rts_lstm, label='lstm',color = 'royalblue')
+ax.plot(x, mean_avg_rts_fc, label='fully connected',color = 'orange')
+ax.fill_between(x, mean_avg_rts_lstm, mean_avg_rts_lstm + std_avg_rts_lstm, color = 'cornflowerblue')
+ax.fill_between(x, mean_avg_rts_lstm, mean_avg_rts_lstm - std_avg_rts_lstm, color = 'cornflowerblue')
+ax.fill_between(x, mean_avg_rts_fc, mean_avg_rts_fc + std_avg_rts_fc, color = 'bisque')
+ax.fill_between(x, mean_avg_rts_fc, mean_avg_rts_fc - std_avg_rts_fc, color = 'bisque')
+ax.set_xlabel('episode')  
+ax.set_ylabel('average undiscounted return per episode')  
+ax.set_title("average undiscounted return per episode") 
+ax.legend()
+
+fig, ax = plt.subplots()
+ax.plot(x, mean_episode_rts_lstm, label='lstm',color = 'royalblue')
+ax.plot(x, mean_episode_rts_fc, label='fully connected',color = 'orange')
+ax.fill_between(x, mean_episode_rts_lstm, mean_episode_rts_lstm + std_episode_rts_lstm, color = 'cornflowerblue')
+ax.fill_between(x, mean_episode_rts_lstm, mean_episode_rts_lstm - std_episode_rts_lstm, color = 'cornflowerblue')
+ax.fill_between(x, mean_episode_rts_fc, mean_episode_rts_fc + std_episode_rts_fc, color = 'bisque')
+ax.fill_between(x, mean_episode_rts_fc, mean_episode_rts_fc - std_episode_rts_fc, color = 'bisque')
+ax.set_xlabel('episode')  
+ax.set_ylabel('undiscounted return of each episode')  
+ax.set_title("undiscounted return of each episode") 
+ax.legend()
+
+#===============================
+#
+#
+# Experiment - Without delay, one input
+# For testing the validity of LSTM network
+#
+#
+#================================
+
+env = SimpleTunlEnv_OneInput()
+net_lstm = AC_Net(2,2,1,['lstm','linear'],[2,2]) 
+net_fc = AC_Net(2,2,1,['linear','linear'],[2,2])
+optimizer_lstm = torch.optim.SGD(net_lstm.parameters(), lr=0.01, momentum=0.9)
+optimizer_fc = torch.optim.SGD(net_fc.parameters(), lr=0.01, momentum=0.9)
+
+runs = 10
+episodes = 500 
+
+
+#For recording and plotting purposes
+result_cum_returns_lstm = []
+result_cum_returns_fc = []
+result_avg_returns_lstm = [] # average return in an episode, not the average of episode return at a certain time step
+result_avg_returns_fc = [] 
+result_episode_returns_lstm = [] 
+result_episode_returns_fc = []
+
+results = []
+
+for i_run in range(runs):
+  cum_return_lstm = 0
+  cum_returns_lstm = []
+  cum_return_fc = 0
+  cum_returns_fc = []
+  avg_returns_lstm = []
+  avg_returns_fc = []
+  episode_returns_lstm = []
+  episode_returns_fc = []
+  for i_episode in range(episodes): # one episode = one sample; finishes when either network is "done" (i.e. chooses correctly)
+      done_lstm = False
+      done_fc = False
+      episode_return_lstm = 0
+      episode_return_fc = 0
+      env.reset()
+      obs = torch.as_tensor(env.observation)
+      obs_lstm = obs
+      obs_fc = obs
       while (not done_fc) and (not done_lstm):
         pol_lstm, val_lstm, lin_act_lstm = net_lstm.forward(obs_lstm.float()) # lin_act_lstm needed if the last layer is linear
         pol_fc, val_fc, lin_act_fc = net_fc.forward(obs_fc.float())
