@@ -1,0 +1,1 @@
+In this project, we simulate an environment based on the Trial-Unique, Delayed Nonmatch-to-Location (TUNL) (Talpos et al., 2010) experiment setup, and an actor-critic network template where you can insert linear or LSTM hidden layers. 
